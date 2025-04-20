@@ -175,6 +175,10 @@ def download_static_website(base_url, output_dir=OUTPUT_FOLDER, convert_html_to_
     domain = parsed_base.netloc
     os.makedirs(output_dir, exist_ok=True)
 
+    new_base_root = base_url.split(domain)[-1].lstrip("/").rstrip('/')
+    if os.path.isdir(output_dir + "/" + new_base_root):
+        return new_base_root
+
     visited = set()
     queue = [base_url]
     visited.add(base_url)
@@ -235,7 +239,7 @@ def download_static_website(base_url, output_dir=OUTPUT_FOLDER, convert_html_to_
     for url in resources_to_download:
         if base_url not in url or "google_tag" in url or "Drupal" in url:
             continue
-        save_resource(url, domain, output_dir, session, headers, convert_html_to_markdown)
+        save_resource(url, domain, output_dir, session, headers, convert_html_to_markdown, end_markdown_with_txt_extension)
 
     # process CSS urls to get any relevant embedded resources
     css_urls = [url for url in resources_to_download if url.lower().endswith('.css')]
@@ -256,7 +260,9 @@ def download_static_website(base_url, output_dir=OUTPUT_FOLDER, convert_html_to_
 
     # download the resources found from CSS urls
     for url in new_resources:
-        save_resource(url, domain, output_dir, session, headers, convert_html_to_markdown)
+        save_resource(url, domain, output_dir, session, headers, convert_html_to_markdown, end_markdown_with_txt_extension)
+
+    return new_base_root
 
 
 def get_user_url():
