@@ -1,15 +1,14 @@
 import uvicorn
-import uuid
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
 from redis import asyncio as aioredis
-from vector_store_util import get_or_make_vector_store
-from main import download_static_website
-from typing import List
+from typing import List, Dict, Union
+from scraper_to_vector_store import get_knowledge_source
+
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
@@ -28,20 +27,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 class VectorStoreRequest(BaseModel):
-    urls: List[str]
-    name: str
+    urls: Union[List[str], Dict[str, str]] = Field(
+        description="Either a list of URLs or a dictionary mapping URLs to refresh times (e.g., '1 day', '2 hours')"
+    )
+    name: str = Field(description="Name for the vector store")
+
 
 class VectorStoreResponse(BaseModel):
     vector_store_id: str
 
+
 @app.post("/vector-store/", response_model=VectorStoreResponse)
 async def create_vector_store(request: VectorStoreRequest):
-    new_base_path = download_static_website(request.urls[0], convert_html_to_markdown=True, end_markdown_with_txt_extension=True)
-    print("Web scraping complete!")
-    path = "output" + "/" + new_base_path.split("/")[0]
-    vector_store_id = get_or_make_vector_store(path, request.name)
-    print("New id is: " + vector_store_id)
+    """
+    Create or update a vector store from web content
+    
+    The URLs can be provided in two formats:
+    - A simple list of URLs: ["https://example.com", "https://another.com"]
+    - A dictionary mapping URLs to refresh times: {"https://example.com": "1 day", "https://another.com": "1 week"}
+    
+    Valid refresh time formats: "X minutes", "X hours", "X days", "X weeks", "X months", "X years"
+    """
+    vector_store_id = get_knowledge_source(request.urls, request.name)
+    print("ID is: " + vector_store_id)
     return {
         'vector_store_id': vector_store_id
     }

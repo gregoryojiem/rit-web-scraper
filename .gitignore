@@ -1,3 +1,6 @@
-.idea
-output
 __pycache__
+.idea
+.env
+testing
+knowledge
+output
