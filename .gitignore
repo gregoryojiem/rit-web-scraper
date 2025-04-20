@@ -1,6 +1,8 @@
 __pycache__
+venv
 .idea
-.env
 testing
 knowledge
 output
+.vercel
+.env*.local

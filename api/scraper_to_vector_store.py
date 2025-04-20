@@ -5,7 +5,8 @@ import re
 from markdownify import markdownify as md
 from io import BytesIO
 from typing import Dict, List, Union
-from vector_store_util import make_vector_store, update_existing_vector_store, fetch_existing_vector_store
+
+from .vector_store_util import make_vector_store, update_existing_vector_store, fetch_existing_vector_store
 
 
 def sanitize_path_part(part):
@@ -135,7 +136,7 @@ def get_knowledge_source(urls_with_refresh: Union[List[str], Dict[str, str]], ks
     
     if existing_id and not urls_to_refresh:
         print(f"Found existing knowledge source with name '{ks_name}'. Using ID: {existing_id}")
-        return existing_id
+        return existing_id, False
     
     url_files_map = {}
     refreshed_urls = []
@@ -159,11 +160,11 @@ def get_knowledge_source(urls_with_refresh: Union[List[str], Dict[str, str]], ks
     
     if not url_files_map and not existing_id:
         print("No content was scraped and no existing vector store found. Aborting.")
-        return None
+        return None, False
     
     if existing_id and not url_files_map:
         print(f"No new content to add to existing vector store. Using ID: {existing_id}")
-        return existing_id
+        return existing_id, True
     
     if existing_id:
         update_existing_vector_store(
@@ -172,7 +173,7 @@ def get_knowledge_source(urls_with_refresh: Union[List[str], Dict[str, str]], ks
             refreshed_urls=refreshed_urls
         )
         print(f"Updated vector store with ID: {existing_id}")
-        return existing_id
+        return existing_id, True
     else:
         vector_store_id = make_vector_store(
             url_files_map=url_files_map,
@@ -180,12 +181,12 @@ def get_knowledge_source(urls_with_refresh: Union[List[str], Dict[str, str]], ks
             source_refresh_times=refresh_times
         )
         print(f"Vector store created with ID: {vector_store_id}")
-        return vector_store_id
+        return vector_store_id, True
 
 
 if __name__ == "__main__":
     urls_to_test = {
-        "https://www.rit.edu/computing/coms/": "1 hour",
+        "https://www.rit.edu/computing/coms/": "1 minute",
         "https://www.rit.edu/liberalarts/expressive-communication-center": "1 week"
     }
     

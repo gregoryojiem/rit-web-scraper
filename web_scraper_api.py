@@ -7,7 +7,7 @@ from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
 from redis import asyncio as aioredis
 from typing import List, Dict, Union
-from scraper_to_vector_store import get_knowledge_source
+from api.scraper_to_vector_store import get_knowledge_source
 
 
 @asynccontextmanager

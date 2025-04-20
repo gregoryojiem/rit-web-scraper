@@ -1,10 +1,8 @@
-beautifulsoup4==4.13.4
-fastapi==0.115.12
-fastapi_cache==0.1.0
+beautifulsoup4~=4.12.2
+bs4~=0.0.2
+pydantic==2.10.6
 markdownify==1.1.0
-openai==1.75.0
-pydantic==2.11.3
-python-dotenv==1.1.0
-redis==4.6.0
+openai==1.55.3
+python-dotenv==1.0.0
 Requests==2.32.3
-uvicorn==0.34.2
+vercel-blob==0.3.0

@@ -6,7 +6,10 @@ import time
 from typing import List, Union, BinaryIO, Tuple, Dict, Optional
 from io import BytesIO
 from dotenv import load_dotenv
-import csv_util
+
+from .blob_storage import add_new_vector_store, add_vector_store_mapping, ensure_csv_exists, \
+    find_vector_store_by_name, find_vector_store_by_sources, find_vector_store_by_id, \
+    update_csv_with_file_mapping, update_url_refresh_times
 
 load_dotenv()
 
@@ -222,12 +225,12 @@ def fetch_existing_vector_store(vector_store_name: str, sources: List[str] = Non
         - boolean indicating if this is a new mapping for an existing vector store
         - list of sources (URLs) that need to be refreshed
     """
-    if csv_util.ensure_csv_exists() and sources:
+    if ensure_csv_exists() and sources:
         return None, False, sources
 
     vector_store_id_by_name, \
         refresh_data_by_name, \
-        file_mapping_by_name = csv_util.find_vector_store_by_name(vector_store_name)
+        file_mapping_by_name = find_vector_store_by_name(vector_store_name)
 
     if vector_store_id_by_name and sources:
         urls_to_refresh = determine_urls_to_refresh(sources, refresh_data_by_name)
@@ -236,12 +239,12 @@ def fetch_existing_vector_store(vector_store_name: str, sources: List[str] = Non
     if sources and not vector_store_id_by_name:
         vector_store_id_by_sources, \
             refresh_data_by_sources, \
-            file_mapping_by_sources = csv_util.find_vector_store_by_sources(sources)
+            file_mapping_by_sources = find_vector_store_by_sources(sources)
 
         if vector_store_id_by_sources:
             urls_to_refresh = determine_urls_to_refresh(sources, refresh_data_by_sources)
 
-            csv_util.add_vector_store_mapping(
+            add_vector_store_mapping(
                 vector_store_name,
                 vector_store_id_by_sources,
                 sources,
@@ -279,7 +282,7 @@ def make_vector_store(url_files_map: Dict[str, List[Union[str, BytesIO, BinaryIO
 
         file_mapping = add_files_to_vector_store(vector_store_id, url_files_map)
 
-        csv_util.add_new_vector_store(
+        add_new_vector_store(
             vector_store_name,
             vector_store_id,
             sources,
@@ -308,7 +311,7 @@ def update_existing_vector_store(vector_store_id: str,
     if not refreshed_urls:
         return
 
-    _, _, file_mapping = csv_util.find_vector_store_by_id(vector_store_id)
+    _, _, file_mapping = find_vector_store_by_id(vector_store_id)
 
     updated_file_mapping = update_vector_store_for_urls(
         vector_store_id,
@@ -317,5 +320,5 @@ def update_existing_vector_store(vector_store_id: str,
         file_mapping
     )
 
-    csv_util.update_csv_with_file_mapping(vector_store_id, updated_file_mapping)
-    csv_util.update_url_refresh_times(vector_store_id, refreshed_urls)
+    update_csv_with_file_mapping(vector_store_id, updated_file_mapping)
+    update_url_refresh_times(vector_store_id, refreshed_urls)

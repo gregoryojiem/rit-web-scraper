@@ -1,39 +1,159 @@
-import os
+"""
+blob_storage.py
+Utility for interacting with Vercel Blob Storage to store vector store mappings
+"""
 import csv
 import json
+import requests
+import time
+import vercel_blob
+from io import StringIO
 from datetime import datetime
-from typing import List, Dict, Tuple, Optional, Any, TextIO
-from contextlib import contextmanager
+from typing import List, Dict, Tuple, Optional, Any
+from dotenv import load_dotenv
 
-CSV_FILE_PATH = "knowledge/vector_store_data.csv"
+load_dotenv()
+
+VECTOR_STORE_CSV = "vector_stores/vector_store_data.csv"
 CSV_FIELDNAMES = ['VectorStoreName', 'CreatedAt', 'VectorStoreID', 'Sources', 'RefreshTimes', 'LastRefreshed',
                   'FileMapping']
 
+DATA_CACHE = {
+}
 
-@contextmanager
-def csv_file_context(mode: str, operation_name: str = "CSV operation") -> TextIO:
-    """Context manager for CSV file operations"""
+
+def get_from_cache(blob_name):
+    """Get data from cache if it exists and is not expired"""
+    if blob_name in DATA_CACHE:
+        cache_entry = DATA_CACHE[blob_name]
+        if time.time() - cache_entry['timestamp'] < cache_entry['ttl']:
+            return cache_entry['data']
+    return None
+
+
+def add_to_cache(blob_name, data, ttl=300):
+    """Add data to cache with a specified TTL (default 5 minutes)"""
+    DATA_CACHE[blob_name] = {
+        'data': data,
+        'timestamp': time.time(),
+        'ttl': ttl
+    }
+
+
+def clear_cache(blob_name=None):
+    """Clear cache for a specific blob or all blobs"""
+    if blob_name:
+        if blob_name in DATA_CACHE:
+            del DATA_CACHE[blob_name]
+    else:
+        DATA_CACHE.clear()
+
+
+async def save_csv_to_blob(data, blob_name=VECTOR_STORE_CSV):
+    """Save a list of dictionaries to Vercel Blob storage as CSV"""
+    if data != [] and not data:
+        return None
+
     try:
-        os.makedirs(os.path.dirname(CSV_FILE_PATH), exist_ok=True)
-        file = open(CSV_FILE_PATH, mode, encoding='utf-8', newline='')
-        yield file
+        blobs = vercel_blob.list()['blobs']
+        matching_blobs = [d for d in blobs if d.get("pathname") == blob_name]
+
+        for existing_blob in matching_blobs:
+            vercel_blob.delete(existing_blob['url'])
+            print(f"Deleted existing blob: {existing_blob['url']}")
     except Exception as e:
-        print(f"Error in {operation_name}: {str(e)}")
-        raise
-    finally:
-        if 'file' in locals():
-            file.close()
+        print(f"Error checking/deleting existing blobs: {str(e)}")
+
+    output = StringIO()
+    fieldnames = CSV_FIELDNAMES
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+
+    for row in data:
+        writer.writerow(row)
+
+    csv_bytes = output.getvalue().encode('utf-8')
+    response = vercel_blob.put(blob_name, csv_bytes, {"contentType": "text/csv"})
+
+    add_to_cache(blob_name, data)
+
+    return response.get('url')
+
+
+async def load_csv_from_blob(blob_name=VECTOR_STORE_CSV):
+    """Load a CSV from Vercel Blob storage as list of dictionaries"""
+    cached_data = get_from_cache(blob_name)
+    if cached_data:
+        print(f"Using cached data for {blob_name}")
+        return cached_data
+
+    try:
+        blobs = vercel_blob.list()['blobs']
+        blob_info = next((d for d in blobs if d.get("pathname") == blob_name), None)
+
+        if not blob_info:
+            print(f"Blob not found: {blob_name}")
+            return []
+
+        url = blob_info.get('url')
+        if not url:
+            print(f"URL not found for blob: {blob_name}")
+            return []
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(url, timeout=10)
+                if response.status_code != 200:
+                    print(f"HTTP error {response.status_code} for {url}, attempt {attempt + 1}/{max_retries}")
+                    if attempt < max_retries - 1:
+                        continue
+                    return []
+
+                if not response.text:
+                    print(f"Empty response from {url}, attempt {attempt + 1}/{max_retries}")
+                    if attempt < max_retries - 1:
+                        continue
+                    return []
+
+                csv_data = StringIO(response.text)
+                reader = csv.DictReader(csv_data)
+                result = [row for row in reader]
+
+                if not result:
+                    print(f"Empty CSV data from {url}, attempt {attempt + 1}/{max_retries}")
+                    if attempt < max_retries - 1:
+                        continue
+
+                print(f"Successfully loaded {len(result)} rows from {blob_name}")
+
+                add_to_cache(blob_name, result)
+
+                return result
+
+            except Exception as e:
+                print(f"Error loading CSV from {url}, attempt {attempt + 1}/{max_retries}: {str(e)}")
+                if attempt < max_retries - 1:
+                    continue
+
+        return []
+    except Exception as e:
+        print(f"Unexpected error in load_csv_from_blob for {blob_name}: {str(e)}")
+        return []
 
 
 def read_csv() -> List[Dict[str, str]]:
     """Reads all data from the CSV file"""
-    if not os.path.exists(CSV_FILE_PATH):
-        return []
+    import asyncio
 
     try:
-        with csv_file_context('r', "reading CSV") as csvfile:
-            reader = csv.DictReader(csvfile)
-            return list(reader)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        result = loop.run_until_complete(load_csv_from_blob(VECTOR_STORE_CSV))
+        loop.close()
+
+        return result
     except Exception as e:
         print(f"Error reading CSV: {str(e)}")
         return []
@@ -41,17 +161,16 @@ def read_csv() -> List[Dict[str, str]]:
 
 def write_csv(rows: List[Dict[str, str]], overwrite: bool = True) -> bool:
     """Writes data to the CSV file"""
+    import asyncio
+
     try:
-        mode = 'w' if overwrite else 'a'
-        with csv_file_context(mode, "writing CSV") as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=CSV_FIELDNAMES, delimiter=',', quotechar='"')
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
-            if overwrite or not os.path.exists(CSV_FILE_PATH) or os.path.getsize(CSV_FILE_PATH) == 0:
-                writer.writeheader()
+        result = loop.run_until_complete(save_csv_to_blob(rows, VECTOR_STORE_CSV))
+        loop.close()
 
-            for row in rows:
-                writer.writerow(row)
-        return True
+        return True if result else False
     except Exception as e:
         print(f"Error writing CSV: {str(e)}")
         return False
@@ -60,27 +179,62 @@ def write_csv(rows: List[Dict[str, str]], overwrite: bool = True) -> bool:
 def append_csv_row(row_data: List[Any]) -> bool:
     """Appends a single row to the CSV file"""
     try:
-        with csv_file_context('a', "appending CSV") as csvfile:
-            writer = csv.writer(csvfile, delimiter=',', quotechar='"')
-            writer.writerow(row_data)
-        return True
+        row_dict = {}
+        for i, field in enumerate(CSV_FIELDNAMES):
+            if i < len(row_data):
+                row_dict[field] = row_data[i]
+            else:
+                row_dict[field] = ""
+
+        existing_data = read_csv()
+
+        existing_data.append(row_dict)
+
+        return write_csv(existing_data)
     except Exception as e:
         print(f"Error appending CSV row: {str(e)}")
         return False
 
 
+async def get_or_create_vector_store_csv():
+    """Get the vector store CSV or create it if it doesn't exist"""
+    cached_data = get_from_cache(VECTOR_STORE_CSV)
+    if cached_data:
+        print(f"Using cached vector store CSV data")
+        return cached_data
+
+    try:
+        blobs = vercel_blob.list()['blobs']
+        blob_exists = any(d.get("pathname") == VECTOR_STORE_CSV for d in blobs)
+
+        if blob_exists:
+            print(f"Vector store CSV exists, loading it")
+            vector_store_data = await load_csv_from_blob(VECTOR_STORE_CSV)
+            return vector_store_data
+        else:
+            print(f"Vector store CSV doesn't exist, creating it")
+            vector_store_data = []
+            await save_csv_to_blob(vector_store_data, VECTOR_STORE_CSV)
+            return vector_store_data
+    except Exception as e:
+        print(f"Error in get_or_create_vector_store_csv: {str(e)}")
+        return []
+
+
 def ensure_csv_exists() -> bool:
     """Creates vector store data CSV if needed"""
-    if not os.path.exists(CSV_FILE_PATH):
-        try:
-            with csv_file_context('w', "creating CSV") as csvfile:
-                writer = csv.writer(csvfile, delimiter=',', quotechar='"')
-                writer.writerow(CSV_FIELDNAMES)
-            return True
-        except Exception as e:
-            print(f"Error creating CSV: {str(e)}")
-            return False
-    return False
+    import asyncio
+
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        result = loop.run_until_complete(get_or_create_vector_store_csv())
+        loop.close()
+
+    except Exception as e:
+        print(f"Error ensuring CSV exists: {str(e)}")
+        return False
 
 
 def parse_refresh_data(row: Dict[str, str]) -> Dict[str, Dict[str, str]]:
@@ -288,3 +442,34 @@ def add_new_vector_store(vector_store_name: str, vector_store_id: str,
         print(f"Added new vector store: {vector_store_name} -> {vector_store_id}")
     except Exception as e:
         print(f"Error adding new vector store: {str(e)}")
+
+
+async def list_blobs(prefix=""):
+    """List all blobs with an optional prefix filter"""
+    try:
+        blobs = vercel_blob.list()['blobs']
+        if prefix:
+            return [b for b in blobs if b.get("pathname", "").startswith(prefix)]
+        return blobs
+    except Exception as e:
+        print(f"Error listing blobs: {str(e)}")
+        return []
+
+
+async def delete_blob(blob_name):
+    """Delete a blob by name"""
+    try:
+        blobs = vercel_blob.list()['blobs']
+        matching_blobs = [d for d in blobs if d.get("pathname") == blob_name]
+
+        for existing_blob in matching_blobs:
+            vercel_blob.delete(existing_blob['url'])
+            print(f"Deleted blob: {existing_blob['pathname']}")
+            clear_cache(blob_name)
+            return True
+
+        print(f"No blob found with name: {blob_name}")
+        return False
+    except Exception as e:
+        print(f"Error deleting blob: {str(e)}")
+        return False
