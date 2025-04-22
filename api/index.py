@@ -129,6 +129,7 @@ class handler(BaseHTTPRequestHandler):
             return
 
     def do_POST(self):
+        global request_count
         base_path, _ = self.extract_query_params()
 
         if base_path == '/api/vector-store' or base_path == '/api/vector-store/' or base_path == '/vector-store' or base_path == '/vector-store/':

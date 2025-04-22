@@ -7,7 +7,7 @@ from typing import List, Union, BinaryIO, Tuple, Dict, Optional
 from io import BytesIO
 from dotenv import load_dotenv
 
-from .blob_storage import add_new_vector_store, add_vector_store_mapping, ensure_csv_exists, \
+from api.blob_storage import add_new_vector_store, add_vector_store_mapping, ensure_csv_exists, \
     find_vector_store_by_name, find_vector_store_by_sources, find_vector_store_by_id, \
     update_csv_with_file_mapping, update_url_refresh_times
 
